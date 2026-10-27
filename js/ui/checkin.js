@@ -2,7 +2,7 @@
 import { $, $$, esc, toast, signed, cls } from './dom.js';
 import { showModal } from './modal.js';
 import { put } from '../db.js';
-import { ymd, fmtDateTime, cutoffOf, weekdayCn } from '../dateutil.js';
+import { ymd, fmtDateTime, cutoffOf, weekdayCn, calcSleepHours } from '../dateutil.js';
 import { LEVELS, STRESS_LEVELS, TASKS, CUTOFF } from '../rules.js';
 import { computeLedger, isOnTime } from '../scoring.js';
 import { isEarlyBirdDay } from '../streaks.js';
@@ -55,9 +55,9 @@ export function render(el, ctx) {
     </div>
     <div class="card">
       <div class="grid3">
-        <div class="field"><label for="sleepHours">睡眠时长（小时）</label><input type="number" id="sleepHours" name="sleepHours" min="0" max="24" step="0.1" inputmode="decimal" value="${esc(r.sleepHours)}"></div>
-        <div class="field"><label for="bedTime">入睡时间</label><input type="time" id="bedTime" name="bedTime" value="${esc(r.bedTime)}"></div>
-        <div class="field"><label for="wakeTime">起床时间</label><input type="time" id="wakeTime" name="wakeTime" value="${esc(r.wakeTime)}"></div>
+        <div class="field"><label for="sleepHours">睡眠时长（小时）</label><input type="number" id="sleepHours" name="sleepHours" min="0" max="24" step="0.1" inputmode="decimal" value="${esc(r.sleepHours)}"><div class="hint" id="sleepAutoHint" hidden>已根据入睡/起床时间自动计算，可手动修改</div></div>
+        <div class="field"><label for="bedTime">入睡时间（选填）</label><input type="time" id="bedTime" name="bedTime" value="${esc(r.bedTime)}"></div>
+        <div class="field"><label for="wakeTime">起床时间（选填）</label><input type="time" id="wakeTime" name="wakeTime" value="${esc(r.wakeTime)}"></div>
       </div>
       <div class="hint" id="earlyHint"></div>
     </div>
@@ -136,6 +136,26 @@ export function render(el, ctx) {
       : '<div class="check auto"><span class="muted">暂无</span></div>';
     $('#preview', el).innerHTML = day ? `<span class="${cls(day.net)}">${signed(day.net)}</span>` : '—';
   }
+  // 睡眠时长自动计算：入睡/起床都填写时自动填入；手动修改睡眠时长后保留手动值，直到再次修改入睡/起床时间
+  const sleepEl = $('#sleepHours', el), bedEl = $('#bedTime', el), wakeEl = $('#wakeTime', el), sleepHint = $('#sleepAutoHint', el);
+  let lastTimes = bedEl.value + '|' + wakeEl.value;
+  {
+    const c = calcSleepHours(bedEl.value, wakeEl.value);
+    sleepHint.hidden = !(c != null && sleepEl.value !== '' && Number(sleepEl.value) === c);
+  }
+  const onTimeChange = () => {
+    const key = bedEl.value + '|' + wakeEl.value;
+    if (key === lastTimes) return;
+    lastTimes = key;
+    const c = calcSleepHours(bedEl.value, wakeEl.value);
+    if (c == null) return;
+    sleepEl.value = String(c);
+    sleepHint.hidden = false;
+    updateLive();
+  };
+  for (const t of [bedEl, wakeEl]) { t.addEventListener('input', onTimeChange); t.addEventListener('change', onTimeChange); }
+  sleepEl.addEventListener('input', () => { sleepHint.hidden = true; });
+
   form.addEventListener('input', updateLive);
   form.addEventListener('change', updateLive);
   updateLive();

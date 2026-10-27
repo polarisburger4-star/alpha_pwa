@@ -1,16 +1,16 @@
 // Service Worker：离线缓存应用外壳 + 尽力而为的 19:30 提醒
-const VERSION = 'alpha-v1.0.0';
+const VERSION = 'alpha-v1.1.0';
 const SHELL = [
   './', './index.html', './manifest.json', './css/style.css', './vendor/chart.umd.min.js',
   './js/app.js', './js/db.js', './js/dateutil.js', './js/rules.js', './js/scoring.js', './js/streaks.js',
-  './js/milestones.js', './js/milestones-config.js', './js/export.js', './js/charts.js', './js/reminder.js', './js/version.js',
+  './js/milestones.js', './js/milestones-config.js', './js/export.js', './js/charts.js', './js/reminder.js', './js/version.js', './js/snapshot.js',
   './js/ui/dom.js', './js/ui/modal.js', './js/ui/checkin.js', './js/ui/stats.js', './js/ui/history.js', './js/ui/exportPage.js',
   './js/ui/rulesPage.js', './js/ui/settings.js', './js/ui/relapse.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {

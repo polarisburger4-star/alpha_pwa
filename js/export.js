@@ -1,6 +1,7 @@
 // 导出/导入：TXT 日志、JSON 备份、校验与合并（纯逻辑 + 下载）
 import { APP_ID, APP_VERSION, SCHEMA_VERSION } from './version.js';
-import { fmtDateTime, weekdayCn } from './dateutil.js';
+import { fmtDateTime, weekdayCn, addDays } from './dateutil.js';
+import { snapshotAsOf } from './snapshot.js';
 import { STATUS_LABEL } from './scoring.js';
 import { TRAINING } from './rules.js';
 
@@ -95,7 +96,38 @@ export function formatDayTxt(day) {
   return L.join('\r\n');
 }
 
-export function buildTxt(ledger, from, to, title) {
+// 快照文本：title 如“周初快照”；newSince 给定时，解锁日期 >= newSince 的里程碑标注【本周解锁】
+export function formatSnapshot(title, label, snap, newSince = null) {
+  const L = [];
+  L.push(`【${title}】${label}`);
+  L.push(`  总积分：${snap.total}`);
+  L.push(`  手淫连续克制天数：${snap.abstinence} 天`);
+  L.push(`  背单词连续天数：${snap.vocab} 天`);
+  L.push(`  早睡早起连续天数：${snap.earlyRise} 天`);
+  L.push(`  连续打卡天数：${snap.checkin} 天`);
+  if (snap.milestones.length) {
+    L.push(`  已解锁里程碑（${snap.milestones.length}）：`);
+    for (const m of snap.milestones) L.push(`    · ${m.name}　解锁日期 ${m.date}${newSince && m.date >= newSince ? '　【本周解锁】' : ''}`);
+  } else L.push('  已解锁里程碑：无');
+  return L.join('\r\n');
+}
+
+// 周报快照：周初 = 本周一前的周日结束时；周末 = 本周日结束时（若本周未结束则截至当前）
+export function weeklySnapshotsTxt(ledger, weekStart, weekEnd, unlocked = []) {
+  const pre = addDays(weekStart, -1);
+  const s0 = snapshotAsOf(ledger, pre, unlocked);
+  const s1 = snapshotAsOf(ledger, weekEnd, unlocked);
+  const l0 = s0.ongoing ? `截至当前（${s0.date} 尚未结束）` : `截至 ${pre} ${weekdayCn(pre)} 结束`;
+  const l1 = s1.ongoing ? `截至当前（今日 ${s1.date} ${weekdayCn(s1.date)}，本周尚未结束）` : `截至 ${weekEnd} ${weekdayCn(weekEnd)} 结束`;
+  return [formatSnapshot('周初快照', l0, s0), formatSnapshot('周末快照', l1, s1, weekStart)].join('\r\n');
+}
+
+export function currentSnapshotTxt(ledger, unlocked = []) {
+  const s = snapshotAsOf(ledger, ledger.today, unlocked);
+  return formatSnapshot('当前快照', `截至当前（${s.date} ${weekdayCn(s.date)}）`, s);
+}
+
+export function buildTxt(ledger, from, to, title, snapshotText = '') {
   const days = ledger.days.filter((d) => d.date >= from && d.date <= to);
   const head = [
     '从零开始阿尔法男人的修炼指南 —— 修炼日志',
@@ -105,6 +137,7 @@ export function buildTxt(ledger, from, to, title) {
     `范围内净分：${days.reduce((s, d) => s + d.net, 0)}　当前总积分：${ledger.total}　历史最高分：${ledger.maxTotal}`,
     '',
   ];
+  if (snapshotText) head.push(snapshotText, '');
   const body = days.length ? days.map(formatDayTxt).join('\r\n') : '（该范围内无记录）';
   return head.join('\r\n') + '\r\n' + body + '\r\n';
 }

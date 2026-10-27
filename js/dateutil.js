@@ -57,3 +57,15 @@ export function fmtDateTime(iso) {
 
 const WD = ['日', '一', '二', '三', '四', '五', '六'];
 export function weekdayCn(s) { return '周' + WD[parseYmd(s).getDay()]; }
+
+// 根据入睡/起床时间计算睡眠时长（小时，保留 1 位小数）；跨午夜自动 +24h。
+// 任一为空或格式无效、或两者相同（无法判断）时返回 null。
+export function calcSleepHours(bed, wake) {
+  const b = timeToMin(bed);
+  const w = timeToMin(wake);
+  if (b == null || w == null) return null;
+  let diff = w - b;
+  if (diff === 0) return null;
+  if (diff < 0) diff += 24 * 60;
+  return Math.round(diff / 6) / 10;
+}

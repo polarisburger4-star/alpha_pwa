@@ -4,7 +4,9 @@ import { computeLedger, anomalies } from '../js/scoring.js';
 import { isEarlyBed, isEarlyWake } from '../js/streaks.js';
 import { newUnlocks, reachedMilestones, nextScoreMilestone } from '../js/milestones.js';
 import { validateBackup, mergeData } from '../js/export.js';
-import { addDays, ymd } from '../js/dateutil.js';
+import { addDays, ymd, calcSleepHours } from '../js/dateutil.js';
+import { snapshotAsOf } from '../js/snapshot.js';
+import { weeklySnapshotsTxt, currentSnapshotTxt, buildTxt } from '../js/export.js';
 
 let pass = 0, fail = 0;
 function test(name, fn) {
@@ -200,6 +202,71 @@ test('备份校验与合并', () => {
   const a = rec(D0, { note: 'old' }); const b = { ...rec(D0, { note: 'new' }), updated_at: at(D0, 23) };
   const m = mergeData({ records: [a], reports: [], unlocked: [] }, { records: [b], reports: [{ id: 'y', date: D0 }], unlocked: [] });
   assert.equal(m.records[0].note, 'new'); assert.equal(m.reports.length, 1);
+});
+
+test('睡眠自动计算：跨午夜 / 同日 / 空值', () => {
+  assert.equal(calcSleepHours('23:10', '07:00'), 7.8);
+  assert.equal(calcSleepHours('22:00', '06:30'), 8.5);
+  assert.equal(calcSleepHours('00:30', '07:00'), 6.5);   // 同日（凌晨入睡）
+  assert.equal(calcSleepHours('13:00', '14:30'), 1.5);   // 同日午睡
+  assert.equal(calcSleepHours('01:00', '05:50'), 4.8);
+  assert.equal(calcSleepHours('', '07:00'), null);
+  assert.equal(calcSleepHours('23:00', ''), null);
+  assert.equal(calcSleepHours('', ''), null);
+  assert.equal(calcSleepHours(undefined, null), null);
+  assert.equal(calcSleepHours('07:00', '07:00'), null);
+});
+
+test('自动计算值计分规则不变（≥7 +2，<5 -5）', () => {
+  const L = computeLedger({ records: [rec(D0, { sleepHours: calcSleepHours('23:10', '07:00'), bedTime: '23:10', wakeTime: '07:00' })], reports: [], now: NOW(D0) });
+  assert.ok(day(L, D0).items.some((i) => i.key === 'sleep7'));
+  const L2 = computeLedger({ records: [rec(D0, { sleepHours: calcSleepHours('02:00', '06:30') })], reports: [], now: NOW(D0) });
+  assert.ok(day(L2, D0).items.some((i) => i.key === 'sleepLow'));
+});
+
+test('快照 as-of：与截至该日结束时重算账本一致；里程碑按日期过滤', () => {
+  // 2026-01-05 是周一。D0=周四。连续 20 天克制+背单词+早睡早起，第 10 天破戒，第 12 天漏打卡
+  const recs = [];
+  for (let i = 0; i < 20; i++) if (i !== 12) recs.push(rec(addDays(D0, i), { bedTime: '23:00', wakeTime: '07:00', sleepHours: 8, tasks: { noMasturbation: true, vocab: true, study: true, approach: true } }));
+  const reports = [{ id: 'r1', date: addDays(D0, 10), created_at: at(addDays(D0, 10), 2) }];
+  const nowD = addDays(D0, 19);
+  const L = computeLedger({ records: recs, reports, now: NOW(nowD) });
+  for (const i of [-3, 0, 2, 6, 9, 10, 11, 12, 13, 18]) {
+    const d = addDays(D0, i);
+    const s = snapshotAsOf(L, d);
+    const ref = computeLedger({ records: recs, reports, now: new Date(...d.split('-').map((x, k) => k === 1 ? x - 1 : +x), 23, 59, 59) });
+    assert.equal(s.total, ref.total, 'total ' + d);
+    assert.equal(s.abstinence, ref.streaks.abstinence.run, 'abst ' + d);
+    assert.equal(s.vocab, ref.streaks.vocab.run, 'vocab ' + d);
+    assert.equal(s.earlyRise, ref.streaks.earlyRise.run, 'early ' + d);
+    assert.equal(s.checkin, ref.streaks.checkin.run, 'checkin ' + d);
+    assert.deepEqual(s.milestones.map((m) => m.id).sort(), reachedMilestones(ref).map((m) => m.id).sort(), 'ms ' + d);
+  }
+  const s9 = snapshotAsOf(L, addDays(D0, 9));
+  assert.equal(s9.abstinence, 10); assert.equal(s9.checkin, 10); assert.equal(s9.ongoing, false);
+  assert.equal(snapshotAsOf(L, addDays(D0, 10)).abstinence, 0);
+  assert.equal(snapshotAsOf(L, addDays(D0, 12)).checkin, 0);
+  assert.equal(snapshotAsOf(L, addDays(D0, -1)).total, 0);
+  const sNow = snapshotAsOf(L, addDays(D0, 30));
+  assert.equal(sNow.ongoing, true); assert.equal(sNow.date, nowD); assert.equal(sNow.total, L.total);
+  // 已存储的解锁记录参与合并（取较早日期）
+  const extra = snapshotAsOf(L, addDays(D0, 2), [{ id: 's200', date: D0 }]);
+  assert.ok(extra.milestones.some((m) => m.id === 's200' && m.date === D0));
+});
+
+test('周报 TXT 含周初/周末快照，本周解锁标注；全部历史含当前快照', () => {
+  const recs = []; for (let i = 0; i < 14; i++) recs.push(rec(addDays(D0, i), { tasks: { noMasturbation: true } }));
+  const L = computeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 13)) }); // 至 01-14（周三）
+  const done = weeklySnapshotsTxt(L, '2026-01-05', '2026-01-11');
+  assert.match(done, /【周初快照】截至 2026-01-04 周日 结束/);
+  assert.match(done, /【周末快照】截至 2026-01-11 周日 结束/);
+  assert.match(done, /克制手淫 7 天.*【本周解锁】/);
+  assert.doesNotMatch(done.split('【周末快照】')[0], /【本周解锁】/);
+  const cur = weeklySnapshotsTxt(L, '2026-01-12', '2026-01-18');
+  assert.match(cur, /【周末快照】截至当前（今日 2026-01-14 周三，本周尚未结束）/);
+  const txt = buildTxt(L, '2026-01-05', '2026-01-11', '周报', done);
+  assert.ok(txt.indexOf('【周初快照】') < txt.indexOf('日期：2026-01-05'));
+  assert.match(currentSnapshotTxt(L), /【当前快照】/);
 });
 
 test('ymd 本地日期格式', () => { assert.match(ymd(new Date()), /^\d{4}-\d{2}-\d{2}$/); });
