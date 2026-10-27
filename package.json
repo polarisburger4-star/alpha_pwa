@@ -1,0 +1,11 @@
+{
+  "name": "alpha-pwa",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "从零开始阿尔法男人的修炼指南（纯前端 PWA，无需构建）",
+  "scripts": {
+    "test": "node tests/scoring.test.mjs",
+    "start": "python3 -m http.server 8080"
+  }
+}
