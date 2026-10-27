@@ -1,6 +1,6 @@
 // 计分引擎：对全部数据做纯函数、确定性的重算，输出逐日账本
 import { ymd, cutoffOf, dateRange } from './dateutil.js';
-import { TASKS, AUTO_BONUS, DEDUCTIONS, CUTOFF } from './rules.js';
+import { TASKS, AUTO_BONUS, DEDUCTIONS, MANUAL_DEDUCTIONS, CUTOFF } from './rules.js';
 import { newStreakState, stepStreak, isEarlyBirdDay } from './streaks.js';
 
 const LOW_MENTAL = new Set(['差', '一般']);
@@ -58,6 +58,7 @@ export function computeLedger({ records = [], reports = [], now = new Date() }) 
     const items = [];
     const warnings = [];
     const completed = [];
+    const deducted = []; // 当日勾选并计入的减分项
     const add = (key, label, points, type) => items.push({ key, label, points, type });
 
     if (status === 'ontime') {
@@ -82,6 +83,13 @@ export function computeLedger({ records = [], reports = [], now = new Date() }) 
       const low = LOW_MENTAL.has(rec.mental);
       if (low && prevMentalLow) add('mentalLow2', DEDUCTIONS.mentalLow2.label, -6, 'deduction');
       prevMentalLow = low;
+      // 每日减分项（手动勾选，每日最多一次；旧记录无 deductions 字段视为全部未勾选）
+      const dd = rec.deductions || {};
+      for (const d of MANUAL_DEDUCTIONS) {
+        if (!dd[d.key]) continue;
+        add(d.key, d.label, d.points, 'deduction');
+        deducted.push(d.label);
+      }
       if (isEarlyBirdDay(rec)) completed.push('早睡早起');
     } else if (status === 'late' || status === 'missed') {
       add('missed', status === 'late' ? '漏打卡（23:30后补录，不计加分）' : DEDUCTIONS.missed.label, -2, 'deduction');
@@ -108,6 +116,7 @@ export function computeLedger({ records = [], reports = [], now = new Date() }) 
         stepStreak(st, 'abstinence', ok && !!t.noMasturbation && reps.length === 0),
         stepStreak(st, 'earlyRise', ok && isEarlyBirdDay(rec)),
         stepStreak(st, 'vocab', ok && !!t.vocab),
+        stepStreak(st, 'coldShower', ok && !!t.coldShower),
       ];
       stepStreak(st, 'checkin', ok);
       for (const r of rewards) if (r) {
@@ -129,9 +138,9 @@ export function computeLedger({ records = [], reports = [], now = new Date() }) 
     }
 
     result.days.push({
-      date, status, record: rec, reports: reps, items, net, total, warnings, completed,
+      date, status, record: rec, reports: reps, items, net, total, warnings, completed, deducted,
       streakSnapshot: {
-        abstinence: st.abstinence.run, earlyRise: st.earlyRise.run, vocab: st.vocab.run, checkin: st.checkin.run,
+        abstinence: st.abstinence.run, earlyRise: st.earlyRise.run, vocab: st.vocab.run, coldShower: st.coldShower.run, checkin: st.checkin.run,
       },
     });
   }

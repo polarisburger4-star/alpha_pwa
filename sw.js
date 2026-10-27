@@ -1,5 +1,5 @@
 // Service Worker：离线缓存应用外壳 + 尽力而为的 19:30 提醒
-const VERSION = 'alpha-v1.1.0';
+const VERSION = 'alpha-v1.2.0';
 const SHELL = [
   './', './index.html', './manifest.json', './css/style.css', './vendor/chart.umd.min.js',
   './js/app.js', './js/db.js', './js/dateutil.js', './js/rules.js', './js/scoring.js', './js/streaks.js',

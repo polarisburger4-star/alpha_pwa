@@ -13,7 +13,7 @@ export function snapshotAsOf(ledger, date, unlocked = []) {
   const ongoing = asOf === today; // 今日尚未结束
   let day = null;
   for (const d of ledger.days) { if (d.date <= asOf) day = d; else break; }
-  const ss = day ? day.streakSnapshot : { abstinence: 0, earlyRise: 0, vocab: 0, checkin: 0 };
+  const ss = day ? day.streakSnapshot : { abstinence: 0, earlyRise: 0, vocab: 0, coldShower: 0, checkin: 0 };
   const byId = new Map();
   for (const m of reachedMilestones(ledger)) if (m.date <= asOf) byId.set(m.id, { id: m.id, date: m.date });
   for (const u of unlocked || []) {
@@ -28,7 +28,7 @@ export function snapshotAsOf(ledger, date, unlocked = []) {
   return {
     date: asOf, requested: date, ongoing,
     total: day ? day.total : 0,
-    abstinence: ss.abstinence, vocab: ss.vocab, earlyRise: ss.earlyRise, checkin: ss.checkin,
+    abstinence: ss.abstinence, vocab: ss.vocab, coldShower: ss.coldShower || 0, earlyRise: ss.earlyRise, checkin: ss.checkin,
     milestones,
   };
 }

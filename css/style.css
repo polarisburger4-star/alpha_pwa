@@ -59,6 +59,9 @@ textarea{min-height:72px;resize:vertical}
 .check.auto{cursor:default}
 .check.auto .tag{font-size:11px;border:1px solid var(--line2);padding:0 5px;color:var(--muted)}
 .check.on .pts{color:var(--green)}
+.checks.deductions{border-color:#5b1f1f}
+.check.ded input{accent-color:var(--red2)}
+.check.ded.on .pts{color:var(--red2)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:var(--r);padding:9px 14px;cursor:pointer;min-height:40px;text-decoration:none;color:var(--text)}
 .btn:hover{border-color:#555b63}
 .btn.primary{background:var(--white);color:#000;border-color:var(--white);font-weight:700}

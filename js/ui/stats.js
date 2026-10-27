@@ -42,9 +42,11 @@ export function render(el, ctx) {
     <div class="stat"><div class="k">历史最高分</div><div class="v">${L.maxTotal}<small>${L.maxTotalDate ? L.maxTotalDate.slice(5) : ''}</small></div></div>
     <div class="stat"><div class="k">手淫连续克制</div><div class="v">${st.abstinence.run}<small>天</small></div></div>
     <div class="stat"><div class="k">背单词连续</div><div class="v">${st.vocab.run}<small>天</small></div></div>
+    <div class="stat"><div class="k">洗冷水澡连续</div><div class="v">${st.coldShower.run}<small>天</small></div></div>
     <div class="stat"><div class="k">连续打卡</div><div class="v">${st.checkin.run}<small>天</small></div></div>
     <div class="stat"><div class="k">早睡早起连续</div><div class="v">${st.earlyRise.run}<small>天</small></div></div>
   </div>
+  <div class="hint" style="margin-top:6px">连续天数均为真实累计天数，不设 30 天重置；各连续奖励节点在一轮不间断的连续中只奖励一次，中断后清零重新开始。</div>
 
   <div class="card" style="margin-top:12px">
     <h3>积分里程碑</h3>

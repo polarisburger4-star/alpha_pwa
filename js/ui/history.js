@@ -17,6 +17,7 @@ export function dayCard(d) {
     if (r.note) kv.push(['备注', r.note]);
   }
   kv.push(['完成项目', d.completed.length ? d.completed.join('、') : '—']);
+  if (d.deducted && d.deducted.length) kv.push(['减分项目', d.deducted.join('、')]);
   d.reports.forEach((p, i) => kv.push([`破戒 #${i + 1}`, `${p.period || '—'} · ${p.medium || '—'} · ${p.trigger || '—'} · 不适：${p.discomfort || '—'}${p.discomfortDesc ? '（' + p.discomfortDesc + '）' : ''}${p.note ? '\n' + p.note : ''}`]));
   if (d.warnings.length) kv.push(['预警', d.warnings.map((w) => w.text).join('；')]);
   const hist = r && r.history ? r.history : [];

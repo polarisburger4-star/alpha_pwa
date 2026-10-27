@@ -22,6 +22,7 @@ export function newStreakState() {
     abstinence: { run: 0, cycle: 0, best: 0 },
     earlyRise: { run: 0, cycle: 0, best: 0 },
     vocab: { run: 0, cycle: 0, best: 0 },
+    coldShower: { run: 0, cycle: 0, best: 0 },
     checkin: { run: 0, cycle: 0, best: 0 },
   };
 }
@@ -38,7 +39,7 @@ export function stepStreak(state, key, qualified) {
     // 超过周期后重新计数：第31天计为新周期第1天
     s.cycle = s.cycle >= def.cycle ? 1 : s.cycle + 1;
   } else {
-    s.cycle = s.run; // 克制手淫：不重置，持续累计
+    s.cycle = s.run; // 不重置，持续累计：每个节点每轮连续只奖励一次
   }
   const pts = def.rewards[s.cycle];
   if (pts) return { key, days: s.cycle, run: s.run, points: pts, label: `${def.label}连续${s.cycle}天` };

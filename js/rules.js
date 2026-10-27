@@ -22,6 +22,9 @@ export const TASKS = [
   { key: 'podcast', label: '收听15分钟podcast', points: 2 },
   { key: 'horseStance', label: '蹲马步5分钟', points: 1 },
   { key: 'meditation', label: '冥想15分钟', points: 2 },
+  { key: 'coldShower', label: '洗冷水澡', points: 2 },
+  { key: 'kindness', label: '帮助他人或传递善意', points: 3 },
+  { key: 'speaking', label: '英语口语练习30分钟', points: 2 },
 ];
 
 // 自动结算的加分项
@@ -39,13 +42,23 @@ export const DEDUCTIONS = {
   missed: { label: '漏打卡', points: -2 },
   sleepLow: { label: '睡眠<5小时', points: -5 },
   mentalLow2: { label: '精神状态连续2天为一般或差', points: -6 },
+  // 手动勾选的每日减分项（每日最多一次，仅按时打卡日计入；记录字段 rec.deductions[key]，旧记录缺省视为 false）
+  eyeAvoid: { label: '和他人对话时眼神闪躲', points: -2, manual: true },
+  fidget: { label: '站立时乱动或坐立时抖腿等小动作', points: -3, manual: true },
 };
 
-// 连续成就
+// 每日减分项（手动勾选），由 DEDUCTIONS 中 manual=true 的条目生成
+export const MANUAL_DEDUCTIONS = Object.entries(DEDUCTIONS)
+  .filter(([, d]) => d.manual)
+  .map(([key, d]) => ({ key, label: d.label, points: d.points }));
+
+// 连续成就（v1.2.0 起全部不设 30 天重置：连续天数持续累计，每个节点在一轮不间断的连续中只奖励一次，
+// 最高节点之后不再有连续奖励；真正中断（未完成、漏打卡、超时补录）后清零，可重新获得各节点）
 export const STREAKS = {
   abstinence: { label: '克制手淫', cycle: null, rewards: { 3: 5, 7: 12, 23: 50, 30: 70 } },
-  earlyRise: { label: '早睡早起', cycle: 30, rewards: { 7: 10, 21: 33, 30: 66 } },
-  vocab: { label: '背单词', cycle: 30, rewards: { 7: 7, 30: 50 } },
+  earlyRise: { label: '早睡早起', cycle: null, rewards: { 7: 10, 21: 33, 30: 66 } },
+  vocab: { label: '背单词', cycle: null, rewards: { 7: 7, 30: 50 } },
+  coldShower: { label: '洗冷水澡', cycle: null, rewards: { 7: 7, 30: 50 } }, // 仅连续奖励，不设里程碑
 };
 
 export const QUICK_PICKS = {

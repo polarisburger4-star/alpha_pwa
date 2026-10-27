@@ -3,7 +3,7 @@ import { $, $$, esc, toast, signed, cls } from './dom.js';
 import { showModal } from './modal.js';
 import { put } from '../db.js';
 import { ymd, fmtDateTime, cutoffOf, weekdayCn, calcSleepHours } from '../dateutil.js';
-import { LEVELS, STRESS_LEVELS, TASKS, CUTOFF } from '../rules.js';
+import { LEVELS, STRESS_LEVELS, TASKS, MANUAL_DEDUCTIONS, CUTOFF } from '../rules.js';
 import { computeLedger, isOnTime } from '../scoring.js';
 import { isEarlyBirdDay } from '../streaks.js';
 
@@ -12,7 +12,7 @@ const seg = (name, opts, val, danger = false) => `<div class="seg ${danger ? 'da
 
 function blank(date) {
   return { date, mental: '', psych: '', stress: '', sleepHours: '', bedTime: '', wakeTime: '', fitness: false,
-    trainingQuality: null, trainingNote: '', note: '', tasks: {} };
+    trainingQuality: null, trainingNote: '', note: '', tasks: {}, deductions: {} };
 }
 
 function statusHtml(date, rec, today) {
@@ -38,6 +38,7 @@ export function render(el, ctx) {
   const reps = state.data.reports.filter((p) => p.date === date);
   const r = rec ? structuredClone(rec) : blank(date);
   r.tasks = r.tasks || {};
+  r.deductions = r.deductions || {}; // 旧记录无此字段，视为未勾选
   const hasRelapse = reps.length > 0;
 
   el.innerHTML = `
@@ -80,6 +81,15 @@ export function render(el, ctx) {
       <h3 style="margin-top:14px">自动结算</h3>
       <div class="checks" id="autoList"></div>
     </div>
+    <div class="card danger">
+      <h3>今日减分项 <span class="muted" style="font-size:12px;font-weight:400">如实勾选，每项每日最多一次</span></h3>
+      <div class="checks deductions">
+        ${MANUAL_DEDUCTIONS.map((d) => {
+          const on = !!r.deductions[d.key];
+          return `<label class="check ded ${on ? 'on' : ''}"><input type="checkbox" name="ded_${d.key}" ${on ? 'checked' : ''}><span>${esc(d.label)}</span><span class="pts">${d.points}</span></label>`;
+        }).join('')}
+      </div>
+    </div>
     <div class="card">
       <div class="field" style="margin-bottom:0"><label for="note">通用备注</label><textarea id="note" name="note" placeholder="今日复盘、想法…">${esc(r.note)}</textarea></div>
     </div>
@@ -108,6 +118,8 @@ export function render(el, ctx) {
       tasks: {},
     };
     for (const t of TASKS) out.tasks[t.key] = !!fd.get('task_' + t.key);
+    out.deductions = {};
+    for (const d of MANUAL_DEDUCTIONS) out.deductions[d.key] = !!fd.get('ded_' + d.key);
     if (hasRelapse) out.tasks.noMasturbation = false;
     if (!out.fitness) out.trainingQuality = null;
     return out;
@@ -130,7 +142,7 @@ export function render(el, ctx) {
     const recs = state.data.records.filter((x) => x.date !== date).concat([d]);
     const L = computeLedger({ records: recs, reports: state.data.reports, now: new Date() });
     const day = L.days.find((x) => x.date === date);
-    const autos = (day ? day.items : []).filter((i) => !TASKS.some((t) => t.key === i.key));
+    const autos = (day ? day.items : []).filter((i) => !TASKS.some((t) => t.key === i.key) && !MANUAL_DEDUCTIONS.some((d) => d.key === i.key));
     $('#autoList', el).innerHTML = autos.length
       ? autos.map((i) => `<div class="check auto"><span class="tag">自动</span><span>${esc(i.label)}</span><span class="pts ${cls(i.points)}">${signed(i.points)}</span></div>`).join('')
       : '<div class="check auto"><span class="muted">暂无</span></div>';

@@ -88,6 +88,7 @@ export function formatDayTxt(day) {
   } else L.push('破戒申报：无');
   L.push(`通用备注：${(r && r.note) || '—'}`);
   L.push(`完成项目：${day.completed.length ? day.completed.join('、') : '—'}`);
+  L.push(`减分项目：${day.deducted && day.deducted.length ? day.deducted.join('、') : '—'}`);
   L.push('积分收支明细：');
   if (day.items.length) day.items.forEach((i) => L.push(`  ${i.points > 0 ? '+' : ''}${i.points}　${i.label}`));
   else L.push('  （无）');
@@ -103,6 +104,7 @@ export function formatSnapshot(title, label, snap, newSince = null) {
   L.push(`  总积分：${snap.total}`);
   L.push(`  手淫连续克制天数：${snap.abstinence} 天`);
   L.push(`  背单词连续天数：${snap.vocab} 天`);
+  L.push(`  洗冷水澡连续天数：${snap.coldShower || 0} 天`);
   L.push(`  早睡早起连续天数：${snap.earlyRise} 天`);
   L.push(`  连续打卡天数：${snap.checkin} 天`);
   if (snap.milestones.length) {

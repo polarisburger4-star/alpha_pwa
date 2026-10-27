@@ -6,7 +6,8 @@ import { newUnlocks, reachedMilestones, nextScoreMilestone } from '../js/milesto
 import { validateBackup, mergeData } from '../js/export.js';
 import { addDays, ymd, calcSleepHours } from '../js/dateutil.js';
 import { snapshotAsOf } from '../js/snapshot.js';
-import { weeklySnapshotsTxt, currentSnapshotTxt, buildTxt } from '../js/export.js';
+import { weeklySnapshotsTxt, currentSnapshotTxt, buildTxt, formatDayTxt } from '../js/export.js';
+import { computeLedger as legacyComputeLedger } from './legacy-v1.1.0/scoring.js';
 
 let pass = 0, fail = 0;
 function test(name, fn) {
@@ -124,19 +125,27 @@ test('早睡早起判定边界', () => {
   assert.equal(isEarlyWake('07:30'), true); assert.equal(isEarlyWake('07:31'), false);
 });
 
-test('早睡早起：7/21/30，超过30天重新计数，60天内两轮奖励', () => {
+test('早睡早起：7/21/30 各一次，不设30天重置，第31天起无奖励，第37天不再奖励7天节点', () => {
   const recs = []; for (let i = 0; i < 60; i++) recs.push(rec(addDays(D0, i), { bedTime: '23:00', wakeTime: '07:00' }));
   const L = computeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 59)) });
-  assert.deepEqual(L.rewards.filter((x) => x.key === 'earlyRise').map((x) => x.days), [7, 21, 30, 7, 21, 30]);
-  assert.equal(L.rewards.filter((x) => x.key === 'earlyRise')[3].date, addDays(D0, 36));
+  const er = L.rewards.filter((x) => x.key === 'earlyRise');
+  assert.deepEqual(er.map((x) => x.days), [7, 21, 30]);
+  assert.deepEqual(er.map((x) => x.date), [addDays(D0, 6), addDays(D0, 20), addDays(D0, 29)]);
+  assert.equal(L.streaks.earlyRise.run, 60);
+  assert.ok(L.days.slice(30).every((d) => !d.items.some((i) => i.type === 'streak')));
+  // 中断后新一轮可再次获得
+  const recs2 = recs.slice(0, 45).concat(recs.slice(46));
+  const L2 = computeLedger({ records: recs2, reports: [], now: NOW(addDays(D0, 59)) });
+  assert.deepEqual(L2.rewards.filter((x) => x.key === 'earlyRise').map((x) => [x.days, x.date]), [[7, addDays(D0, 6)], [21, addDays(D0, 20)], [30, addDays(D0, 29)], [7, addDays(D0, 52)]]);
 });
 
-test('背单词：7/30 循环；断一天清零', () => {
-  const recs = []; for (let i = 0; i < 37; i++) recs.push(rec(addDays(D0, i), { tasks: { vocab: i !== 3 } }));
-  const L = computeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 36)) });
-  // 第0-2天3天，第3天断，第4天起 33 天：7、30、(31→1..3)
-  assert.deepEqual(L.rewards.filter((x) => x.key === 'vocab').map((x) => x.days), [7, 30]);
-  assert.equal(L.streaks.vocab.run, 33); assert.equal(L.streaks.vocab.cycle, 3);
+test('背单词：7/30 各一次不重置；断一天清零', () => {
+  const recs = []; for (let i = 0; i < 45; i++) recs.push(rec(addDays(D0, i), { tasks: { vocab: i !== 3 } }));
+  const L = computeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 44)) });
+  // 第0-2天3天，第3天断，第4天起 41 天：仅 7、30；第31天(=第34日)及以后、第37天均无奖励
+  assert.deepEqual(L.rewards.filter((x) => x.key === 'vocab').map((x) => [x.days, x.date]), [[7, addDays(D0, 10)], [30, addDays(D0, 33)]]);
+  assert.equal(L.streaks.vocab.run, 41); assert.equal(L.streaks.vocab.cycle, 41);
+  assert.ok(!day(L, addDays(D0, 40)).items.some((i) => i.type === 'streak')); // 连续第37天
 });
 
 test('睡眠 <5 扣 5；≥7 加 2；空值不计', () => {
@@ -267,6 +276,201 @@ test('周报 TXT 含周初/周末快照，本周解锁标注；全部历史含�
   const txt = buildTxt(L, '2026-01-05', '2026-01-11', '周报', done);
   assert.ok(txt.indexOf('【周初快照】') < txt.indexOf('日期：2026-01-05'));
   assert.match(currentSnapshotTxt(L), /【当前快照】/);
+});
+
+// ───────────── v1.2.0：新增任务 / 每日减分项 / 洗冷水澡连续 ─────────────
+test('新任务：洗冷水澡 +2、帮助他人或传递善意 +3、英语口语练习30分钟 +2', () => {
+  let L = computeLedger({ records: [rec(D0, { tasks: { coldShower: true } })], reports: [], now: NOW(D0) });
+  assert.equal(L.total, 1 + 2); assert.ok(day(L, D0).items.some((i) => i.key === 'coldShower' && i.points === 2));
+  L = computeLedger({ records: [rec(D0, { tasks: { kindness: true } })], reports: [], now: NOW(D0) });
+  assert.equal(L.total, 1 + 3); assert.ok(day(L, D0).items.some((i) => i.key === 'kindness' && i.points === 3));
+  L = computeLedger({ records: [rec(D0, { tasks: { speaking: true } })], reports: [], now: NOW(D0) });
+  assert.equal(L.total, 1 + 2); assert.ok(day(L, D0).items.some((i) => i.key === 'speaking' && i.points === 2));
+  L = computeLedger({ records: [rec(D0, { tasks: { coldShower: true, kindness: true, speaking: true } })], reports: [], now: NOW(D0) });
+  assert.equal(L.total, 1 + 2 + 3 + 2);
+  assert.deepEqual(day(L, D0).completed, ['洗冷水澡', '帮助他人或传递善意', '英语口语练习30分钟']);
+  // 英语口语练习：无连续奖励
+  const recs = []; for (let i = 0; i < 30; i++) recs.push(rec(addDays(D0, i), { tasks: { speaking: true } }));
+  L = computeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 29)) });
+  assert.equal(L.rewards.length, 0); assert.equal(L.total, 30 * 3 - 29 * 6); // 精神一般连续 -6
+});
+
+test('每日减分项：眼神闪躲 -2、小动作 -3（按时日计入，每日一次）', () => {
+  let L = computeLedger({ records: [rec(D0, { deductions: { eyeAvoid: true } })], reports: [], now: NOW(D0) });
+  assert.equal(L.total, 1 - 2);
+  assert.ok(day(L, D0).items.some((i) => i.key === 'eyeAvoid' && i.points === -2 && i.type === 'deduction'));
+  L = computeLedger({ records: [rec(D0, { deductions: { fidget: true } })], reports: [], now: NOW(D0) });
+  assert.equal(L.total, 1 - 3);
+  L = computeLedger({ records: [rec(D0, { tasks: { kindness: true }, deductions: { eyeAvoid: true, fidget: true } })], reports: [], now: NOW(D0) });
+  assert.equal(L.total, 1 + 3 - 2 - 3);
+  assert.equal(day(L, D0).items.filter((i) => i.key === 'eyeAvoid').length, 1);
+  assert.deepEqual(day(L, D0).deducted, ['和他人对话时眼神闪躲', '站立时乱动或坐立时抖腿等小动作']);
+  // 未勾选 / 字段缺失 = 不扣分
+  L = computeLedger({ records: [rec(D0, { deductions: { eyeAvoid: false, fidget: false } })], reports: [], now: NOW(D0) });
+  assert.equal(L.total, 1);
+});
+
+test('超时补录日：新加分与每日减分项均不计，仅 -2 及破戒', () => {
+  const o = { mental: '优秀', tasks: { coldShower: true, kindness: true, speaking: true }, deductions: { eyeAvoid: true, fidget: true } };
+  let L = computeLedger({ records: [rec(D0, o, 23, 30)], reports: [], now: NOW(addDays(D0, 1), 10) });
+  let d = day(L, D0);
+  assert.equal(d.status, 'late'); assert.equal(d.net, -2); assert.deepEqual(keys(d), ['missed']);
+  assert.deepEqual(d.completed, []); assert.deepEqual(d.deducted, []);
+  const r = rec(D0, o); r.created_at = at(addDays(D0, 1), 8); // 次日补录
+  L = computeLedger({ records: [r], reports: [{ id: 'z', date: D0, created_at: at(D0, 3) }], now: NOW(addDays(D0, 1), 9) });
+  d = day(L, D0);
+  assert.equal(d.status, 'late'); assert.equal(d.net, -2 - 10); assert.deepEqual(keys(d), ['missed', 'relapse']);
+});
+
+test('洗冷水澡连续：第7天 +7、第30天 +50；不重置，第31天起无奖励，第37天不再奖励7天节点', () => {
+  const recs = []; for (let i = 0; i < 60; i++) recs.push(rec(addDays(D0, i), { tasks: { coldShower: true } }));
+  let L = computeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 59)) });
+  const cs = L.rewards.filter((x) => x.key === 'coldShower');
+  assert.deepEqual(cs.map((x) => x.days), [7, 30]);
+  assert.deepEqual(cs.map((x) => x.points), [7, 50]);
+  assert.deepEqual(cs.map((x) => x.date), [addDays(D0, 6), addDays(D0, 29)]);
+  assert.equal(cs[0].label, '洗冷水澡连续7天'); assert.equal(cs[1].label, '洗冷水澡连续30天');
+  assert.equal(L.streaks.coldShower.run, 60);
+  assert.equal(L.rewards.filter((x) => x.key !== 'coldShower').length, 0);
+  assert.equal(day(L, addDays(D0, 6)).items.find((i) => i.key === 'streak_coldShower').points, 7);
+  assert.equal(day(L, addDays(D0, 29)).items.find((i) => i.key === 'streak_coldShower').points, 50);
+  for (let i = 30; i < 60; i++) assert.ok(!day(L, addDays(D0, i)).items.some((x) => x.type === 'streak'), 'day ' + (i + 1));
+  assert.equal(day(L, addDays(D0, 36)).streakSnapshot.coldShower, 37);
+  // 每日分值：30 天前后只差奖励
+  assert.equal(day(L, addDays(D0, 36)).net, 1 + 2 - 6);
+  // 中断（未勾选）后清零，新一轮可再得 7 天节点
+  const recs2 = recs.map((r, i) => (i === 40 ? rec(r.date, { tasks: {} }) : r));
+  L = computeLedger({ records: recs2, reports: [], now: NOW(addDays(D0, 59)) });
+  assert.deepEqual(L.rewards.filter((x) => x.key === 'coldShower').map((x) => [x.days, x.date]), [[7, addDays(D0, 6)], [30, addDays(D0, 29)], [7, addDays(D0, 47)]]);
+  assert.equal(L.streaks.coldShower.run, 19);
+  // 不产生任何新里程碑
+  assert.ok(reachedMilestones(L).every((m) => m.type === 'score' || m.type === 'abstinence'));
+});
+
+test('超时补录 / 漏打卡中断洗冷水澡连续', () => {
+  const recs = [];
+  for (let i = 0; i < 10; i++) {
+    const r = rec(addDays(D0, i), { tasks: { coldShower: true } });
+    if (i === 5) r.created_at = at(addDays(D0, 6), 8); // 第6天次日补录
+    recs.push(r);
+  }
+  let L = computeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 9)) });
+  assert.equal(day(L, addDays(D0, 5)).streakSnapshot.coldShower, 0);
+  assert.equal(L.streaks.coldShower.run, 4);
+  assert.equal(L.rewards.filter((x) => x.key === 'coldShower').length, 0); // 5 天 + 4 天，均未到 7
+  // 23:30 超时同样中断
+  const recs2 = []; for (let i = 0; i < 8; i++) recs2.push(rec(addDays(D0, i), { tasks: { coldShower: true } }, i === 6 ? 23 : 21, i === 6 ? 45 : 0));
+  L = computeLedger({ records: recs2, reports: [], now: NOW(addDays(D0, 7)) });
+  assert.equal(L.streaks.coldShower.run, 1); assert.equal(L.rewards.filter((x) => x.key === 'coldShower').length, 0);
+  // 漏打卡中断
+  L = computeLedger({ records: recs.filter((_, i) => i !== 3).map((r, i) => (i === 4 ? { ...r, created_at: at(r.date, 21) } : r)), reports: [], now: NOW(addDays(D0, 9)) });
+  assert.equal(L.streaks.coldShower.run, 6);
+});
+
+test('历史 / TXT / 快照：完成项、减分项、积分明细与洗冷水澡连续', () => {
+  const recs = []; for (let i = 0; i < 14; i++) recs.push(rec(addDays(D0, i), { tasks: { coldShower: i >= 2, kindness: i === 5, speaking: i === 5 }, deductions: { eyeAvoid: i === 5, fidget: i === 5 } }));
+  const L = computeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 13)) }); // 至 01-14（周三）
+  const t5 = formatDayTxt(day(L, addDays(D0, 5)));
+  assert.match(t5, /完成项目：洗冷水澡、帮助他人或传递善意、英语口语练习30分钟/);
+  assert.match(t5, /减分项目：和他人对话时眼神闪躲、站立时乱动或坐立时抖腿等小动作/);
+  assert.match(t5, /\+3　帮助他人或传递善意/); assert.match(t5, /\+2　英语口语练习30分钟/);
+  assert.match(t5, /-2　和他人对话时眼神闪躲/); assert.match(t5, /-3　站立时乱动或坐立时抖腿等小动作/);
+  assert.match(formatDayTxt(day(L, D0)), /减分项目：—/);
+  const t8 = formatDayTxt(day(L, addDays(D0, 8)));
+  assert.match(t8, /\+7　成就：洗冷水澡连续7天/);
+  const wk = weeklySnapshotsTxt(L, '2026-01-05', '2026-01-11');
+  assert.match(wk.split('【周末快照】')[0], /洗冷水澡连续天数：2 天/);   // 截至 01-04：第3、4天
+  assert.match(wk.split('【周末快照】')[1], /洗冷水澡连续天数：9 天/);   // 截至 01-11
+  assert.match(currentSnapshotTxt(L), /洗冷水澡连续天数：12 天/);
+  assert.equal(snapshotAsOf(L, addDays(D0, -1)).coldShower, 0);
+});
+
+// 向后兼容：用 v1.1.0 原版计分引擎（tests/legacy-v1.1.0 原样副本）对比多周旧数据
+function mulberry32(a) { return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function oldSample(seed = 42, nDays = 84, longAbst = false) {
+  const rnd = mulberry32(seed); const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const OLD_TASKS = ['microHabit', 'noMasturbation', 'chores', 'study', 'reading', 'vocab', 'approach', 'podcast', 'horseStance', 'meditation'];
+  const LV = ['差', '一般', '良好', '优秀']; const SV = ['轻', '中', '高', 'EM'];
+  const records = []; const reports = []; const start = '2026-02-02';
+  for (let i = 0; i < nDays; i++) {
+    const d = addDays(start, i); const x = rnd();
+    if (!longAbst && x < 0.06) continue; // 漏打卡
+    const tasks = {}; for (const k of OLD_TASKS) if (rnd() < (k === 'noMasturbation' || k === 'vocab' ? 0.85 : 0.5)) tasks[k] = true;
+    if (longAbst) { tasks.noMasturbation = true; if (i % 12 === 11) delete tasks.vocab; } // 克制连续 >30；背单词每 12 天必断
+    const good = rnd() < 0.7 && !(longAbst && i % 15 === 14);
+    const r = rec(d, {
+      mental: pick(LV), psych: pick(LV), stress: pick(SV),
+      sleepHours: rnd() < 0.15 ? '' : Math.round((3 + rnd() * 6) * 10) / 10,
+      bedTime: good ? '22:50' : pick(['23:40', '00:30', '23:10']), wakeTime: good ? '07:00' : pick(['07:30', '08:10']),
+      fitness: rnd() < 0.5, trainingQuality: pick(['high', 'partial', null]), tasks,
+    }, !longAbst && x < 0.12 ? 23 : 21, !longAbst && x < 0.12 ? 50 : 0); // 约 6% 超时
+    if (!longAbst && x >= 0.12 && x < 0.15) r.created_at = at(addDays(d, 1), 9); // 次日补录
+    if (rnd() < 0.03) delete r.tasks; // 极旧记录可能无 tasks
+    records.push(r);
+    if (longAbst ? i === 50 : rnd() < 0.08) reports.push({ id: 'p' + i, date: d, created_at: at(d, 2), period: '深夜' });
+    if (!longAbst && rnd() < 0.02) reports.push({ id: 'q' + i, date: d, created_at: at(d, 3) });
+  }
+  return { records, reports, now: NOW(addDays(start, nDays - 1), 20) }; // 最后一天待打卡
+}
+const OLD_STREAK_KEYS = ['abstinence', 'earlyRise', 'vocab', 'checkin'];
+// v1.2.0 取消早睡早起/背单词的 30 天重置：仅当旧数据中这两项连续从未超过 30 天时，新旧账本才应完全一致
+const maxRun = (L, k) => Math.max(0, ...L.days.map((d) => d.streakSnapshot[k]));
+function assertLedgerSame(a, b) {
+  assert.equal(b.days.length, a.days.length);
+  assert.equal(b.total, a.total); assert.equal(b.maxTotal, a.maxTotal); assert.equal(b.maxTotalDate, a.maxTotalDate);
+  assert.deepEqual(b.rewards, a.rewards);
+  for (const k of OLD_STREAK_KEYS) assert.deepEqual(b.streaks[k], a.streaks[k], k);
+  a.days.forEach((x, i) => {
+    const y = b.days[i];
+    assert.equal(y.date, x.date); assert.equal(y.status, x.status, x.date);
+    assert.equal(y.net, x.net, 'net ' + x.date); assert.equal(y.total, x.total, 'total ' + x.date);
+    assert.deepEqual(y.items, x.items, 'items ' + x.date);
+    assert.deepEqual(y.warnings, x.warnings); assert.deepEqual(y.completed, x.completed);
+    assert.deepEqual(y.deducted, []);
+    for (const k of OLD_STREAK_KEYS) assert.equal(y.streakSnapshot[k], x.streakSnapshot[k]);
+    assert.equal(y.streakSnapshot.coldShower, 0);
+  });
+}
+
+test('向后兼容：12 周旧数据新旧账本逐日完全一致（多个随机种子 + 克制连续>30天样本）', () => {
+  for (const seed of [1, 7, 42, 2026, 99991]) {
+    const { records, reports, now } = oldSample(seed);
+    const a = legacyComputeLedger({ records, reports, now });
+    const b = computeLedger({ records, reports, now });
+    assert.ok(a.days.length >= 80 && a.days.some((d) => d.status === 'late') && a.days.some((d) => d.status === 'missed') && a.rewards.length > 0);
+    assert.ok(maxRun(a, 'earlyRise') <= 30 && maxRun(a, 'vocab') <= 30, 'sample must not contain >30-day earlyRise/vocab streaks');
+    assertLedgerSame(a, b);
+    assert.deepEqual(reachedMilestones(b), reachedMilestones(a));
+  }
+  const s = oldSample(5, 84, true);
+  const a = legacyComputeLedger(s); const b = computeLedger(s);
+  assert.ok(maxRun(a, 'abstinence') > 30 && maxRun(a, 'earlyRise') <= 30 && maxRun(a, 'vocab') <= 30);
+  assertLedgerSame(a, b);
+  assert.deepEqual(reachedMilestones(b), reachedMilestones(a));
+});
+
+test('规则变更（有意）：旧数据中早睡早起/背单词连续 >30 天时，第31天后不再循环奖励', () => {
+  const recs = []; for (let i = 0; i < 40; i++) recs.push(rec(addDays(D0, i), { tasks: { vocab: true } }));
+  const a = legacyComputeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 39)) });
+  const b = computeLedger({ records: recs, reports: [], now: NOW(addDays(D0, 39)) });
+  assert.deepEqual(a.rewards.map((x) => x.days), [7, 30, 7]); // v1.1.0：第37天再得 +7
+  assert.deepEqual(b.rewards.map((x) => x.days), [7, 30]);    // v1.2.0：不再奖励
+  assert.equal(a.total - b.total, 7);
+  assert.equal(day(a, addDays(D0, 35)).total, day(b, addDays(D0, 35)).total); // 差异前完全一致
+});
+
+test('向后兼容：v1.1.0 JSON 备份可导入（替换/合并），分数不变', () => {
+  const { records, reports, now } = oldSample(42);
+  const backup = JSON.parse(JSON.stringify({ app: 'alpha-pwa', schemaVersion: 1, appVersion: '1.1.0', exportedAt: '2026-04-27T12:00:00.000Z', records, reports, unlocked: [{ id: 's200', date: '2026-03-01' }], settings: { reminderEnabled: false } }));
+  const v = validateBackup(backup); assert.equal(v.ok, true, v.errors.join(';'));
+  const ref = legacyComputeLedger({ records, reports, now });
+  assertLedgerSame(ref, computeLedger({ records: backup.records, reports: backup.reports, now }));
+  const merged = mergeData({ records: [], reports: [], unlocked: [] }, backup);
+  assertLedgerSame(ref, computeLedger({ records: merged.records, reports: merged.reports, now }));
+  // 与含新字段的新记录合并：新记录（较新 updated_at）生效，其余旧日不受影响
+  const d = records[3].date; const newer = { ...records[3], tasks: { ...(records[3].tasks || {}), coldShower: true }, deductions: { eyeAvoid: true }, updated_at: at(addDays(d, 30), 9) };
+  const m2 = mergeData({ records: [newer], reports: [], unlocked: [] }, backup);
+  assert.equal(m2.records.find((r) => r.date === d).deductions.eyeAvoid, true);
 });
 
 test('ymd 本地日期格式', () => { assert.match(ymd(new Date()), /^\d{4}-\d{2}-\d{2}$/); });
